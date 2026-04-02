@@ -41,7 +41,13 @@ async function searchJobs(options = {}) {
   if (jobType) queryOptions.jobType = jobType;
 
   try {
-    const results = await indeed.query(queryOptions);
+    const results = await indeed.query(
+      query,
+      location || 'United Kingdom',
+      String(radius),
+      jobType || '',
+      String(maxAge)
+    );
     return results.map(normalizeJob);
   } catch (err) {
     console.error('Scraper error:', err.message);

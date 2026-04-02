@@ -301,6 +301,7 @@ tbody tr:hover{background:#f8fafc}
           <select id="ai-job-select" onchange="onAIJobChange()"><option value="">— Select a job —</option></select>
         </div>
         <button class="btn-primary" id="ai-analyse-btn" onclick="analyseJob()" disabled>&#9889; Analyse CV vs Job</button>
+        <button class="btn-primary" id="ai-auto-btn" onclick="autoApplyJob()" disabled style="background:var(--teal)">&#129302; Auto Apply (AI)</button>
       </div>
       <div id="ai-job-desc-preview" style="display:none;margin-top:12px;background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:.8rem;color:var(--muted);max-height:100px;overflow-y:auto"></div>
     </div>
@@ -335,7 +336,10 @@ tbody tr:hover{background:#f8fafc}
             <div style="width:28px;height:28px;border-radius:50%;background:var(--teal);color:#fff;font-size:.78rem;font-weight:700;display:flex;align-items:center;justify-content:center">3</div>
             <h3 style="color:var(--navy);font-size:.95rem;font-weight:600">Edit Suggestions</h3>
           </div>
-          <button class="btn-primary" id="ai-apply-btn" onclick="applyEdits()" disabled style="background:var(--green)">&#10003; Apply Approved Edits to Profile</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn-secondary" onclick="approveAllSuggestions()">&#10003; Approve All</button>
+            <button class="btn-primary" id="ai-apply-btn" onclick="applyEdits()" disabled style="background:var(--green)">&#10003; Apply Approved Edits to Profile</button>
+          </div>
         </div>
         <div id="suggestions-list"></div>
       </div>
@@ -397,6 +401,7 @@ tbody tr:hover{background:#f8fafc}
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
       <button class="btn-primary" id="mass-gen-btn" onclick="massGenerate()" disabled style="font-size:1rem;padding:12px 28px">&#9889; Generate Documents</button>
+      <button class="btn-primary" id="mass-auto-btn" onclick="massAutoApply()" disabled style="font-size:1rem;padding:12px 28px;background:var(--teal)">&#129302; Auto Apply All (AI)</button>
       <a id="mass-download-btn" class="btn-primary" style="display:none;text-decoration:none;font-size:1rem;padding:12px 28px;background:var(--green)">&#11015; Download All as ZIP</a>
     </div>
     <div id="mass-progress"></div>
@@ -826,6 +831,7 @@ function populateAIJobSelect() {
   sel.innerHTML = '<option value="">— Select a job to analyse —</option>' + state.jobs.map(j => `<option value="${j.id}" ${j.id == cur ? 'selected' : ''}>${esc(j.title)} — ${esc(j.company)}</option>`).join('');
   if (cur) sel.value = cur;
   document.getElementById('ai-analyse-btn').disabled = !sel.value;
+  document.getElementById('ai-auto-btn').disabled = !sel.value;
   document.getElementById('gen-cv-btn').disabled = !sel.value;
   document.getElementById('gen-letter-btn').disabled = !sel.value;
 }
@@ -833,6 +839,7 @@ function onAIJobChange() {
   const id = parseInt(document.getElementById('ai-job-select').value) || null;
   state.ai.jobId = id;
   document.getElementById('ai-analyse-btn').disabled = !id;
+  document.getElementById('ai-auto-btn').disabled = !id;
   document.getElementById('gen-cv-btn').disabled = !id;
   document.getElementById('gen-letter-btn').disabled = !id;
   document.getElementById('ai-score-section').style.display = 'none';
@@ -1009,6 +1016,8 @@ function updateMassCount() {
   document.getElementById('mass-selected-count').textContent = `${n} job${n !== 1 ? 's' : ''} selected`;
   document.getElementById('mass-gen-btn').disabled = n === 0;
   document.getElementById('mass-gen-btn').textContent = n > 0 ? `⚡ Generate Documents for ${n} Job${n !== 1 ? 's' : ''}` : '⚡ Generate Documents';
+  document.getElementById('mass-auto-btn').disabled = n === 0;
+  document.getElementById('mass-auto-btn').textContent = n > 0 ? `🤖 Auto Apply All for ${n} Job${n !== 1 ? 's' : ''}` : '🤖 Auto Apply All (AI)';
 }
 async function massGenerate() {
   const jobIds = [...state.mass.selected];
@@ -1037,6 +1046,79 @@ async function massGenerate() {
     state.jobs = await api('GET', '/api/jobs').catch(() => state.jobs);
     renderMassJobList();
     showToast(`Generated docs for ${results.filter(r => r.success).length}/${jobIds.length} jobs ✓`);
+  } catch (e) { showToast(e.message, 'error'); }
+  finally { updateMassCount(); }
+}
+
+async function approveAllSuggestions() {
+  if (!state.ai.jobId || !state.ai.suggestions.length) return;
+  try {
+    await api('POST', `/api/ai/suggestions/${state.ai.jobId}/approve-all`, {});
+    state.ai.suggestions = await api('GET', `/api/ai/suggestions/${state.ai.jobId}`);
+    if (!Array.isArray(state.ai.suggestions)) state.ai.suggestions = [];
+    renderSuggestions();
+    showToast('All suggestions approved ✓');
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function autoApplyJob() {
+  if (!state.ai.jobId) { showToast('Select a job first', 'error'); return; }
+  const btn = document.getElementById('ai-auto-btn');
+  btn.innerHTML = '<span class="spinner"></span>AI working...'; btn.disabled = true;
+  document.getElementById('ai-analyse-btn').disabled = true;
+  try {
+    const result = await api('POST', '/api/ai/auto-apply', { jobId: state.ai.jobId });
+    // Refresh jobs and show score
+    state.jobs = await api('GET', '/api/jobs').catch(() => state.jobs);
+    const j = state.jobs.find(x => x.id === state.ai.jobId);
+    if (j && result.score) { j.ats = result.score; const el = document.getElementById('ats-' + state.ai.jobId); if (el) { el.textContent = result.score + '%'; el.className = 'ats-num ' + atsClass(result.score); } }
+    // Show download buttons
+    if (result.cvGenerated && state.ai.jobId) {
+      const cvBtn = document.getElementById('cv-download-btn');
+      cvBtn.href = `/api/ai/download/${state.ai.jobId}/cv`; cvBtn.style.display = 'inline-flex';
+      document.getElementById('cv-preview-wrap').style.display = 'block';
+      document.getElementById('cv-preview').textContent = 'CV generated ✓ — click download to get .docx file';
+    }
+    if (result.letterGenerated && state.ai.jobId) {
+      const lBtn = document.getElementById('letter-download-btn');
+      lBtn.href = `/api/ai/download/${state.ai.jobId}/letter`; lBtn.style.display = 'inline-flex';
+      document.getElementById('letter-preview-wrap').style.display = 'block';
+      document.getElementById('letter-preview').textContent = 'Cover letter generated ✓ — click download to get .docx file';
+    }
+    showToast(`Auto Apply complete! Score: ${result.score}%, ${result.suggestionsApplied} edits applied ✓`);
+    renderJobTable();
+  } catch (e) { showToast(e.message, 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = '&#129302; Auto Apply (AI)'; document.getElementById('ai-analyse-btn').disabled = false; }
+}
+
+async function massAutoApply() {
+  const jobIds = [...state.mass.selected];
+  if (!jobIds.length) { showToast('Select at least one job', 'error'); return; }
+  const btn = document.getElementById('mass-auto-btn');
+  btn.innerHTML = `<span class="spinner"></span>AI applying for ${jobIds.length} jobs...`; btn.disabled = true;
+  document.getElementById('mass-gen-btn').disabled = true;
+  document.getElementById('mass-download-btn').style.display = 'none';
+  const progressEl = document.getElementById('mass-progress');
+  progressEl.innerHTML = '<h4 style="font-size:.875rem;font-weight:600;color:var(--navy);margin-bottom:12px">AI Auto-Apply Progress</h4>' + jobIds.map(id => {
+    const j = state.jobs.find(x => x.id === id);
+    return `<div class="prog-item" id="prog-${id}"><span class="spinner spinner-dark"></span>${esc(j?.title || 'Job')} — ${esc(j?.company || '')}</div>`;
+  }).join('');
+  try {
+    const results = await api('POST', '/api/ai/mass-auto-apply', { jobIds });
+    results.forEach(r => {
+      const el = document.getElementById('prog-' + r.jobId);
+      if (el) el.innerHTML = `${r.success ? '✅' : '❌'} ${esc(r.title || '')} — ${esc(r.company || '')}${r.score ? ` <span style="color:var(--teal);font-size:.78rem">Score: ${r.score}%</span>` : ''}${r.error ? ` <span style="color:var(--red);font-size:.78rem">(${esc(r.error)})</span>` : ''}`;
+      if (r.success) { const j = state.jobs.find(x => x.id === r.jobId); if (j) { j.cv_generated = true; j.letter_generated = true; j.ats = r.score; } }
+    });
+    const readyIds = results.filter(r => r.success).map(r => r.jobId);
+    if (readyIds.length) {
+      const dlBtn = document.getElementById('mass-download-btn');
+      dlBtn.style.display = 'inline-flex';
+      dlBtn.onclick = () => { window.location = '/api/ai/download-zip?jobs=' + readyIds.join(','); };
+    }
+    state.jobs = await api('GET', '/api/jobs').catch(() => state.jobs);
+    renderMassJobList(); renderJobTable();
+    showToast(`Auto Apply complete for ${results.filter(r => r.success).length}/${jobIds.length} jobs ✓`);
   } catch (e) { showToast(e.message, 'error'); }
   finally { updateMassCount(); }
 }
