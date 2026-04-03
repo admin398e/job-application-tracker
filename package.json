@@ -5,11 +5,14 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "db:init": "npx neonctl@latest init",
+    "db:connect": "npx neonctl@latest connection-string"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.0",
     "archiver": "^7.0.1",
+    "chrono-node": "^2.9.0",
     "cors": "^2.8.5",
     "docx": "^9.0.0",
     "dotenv": "^16.4.7",
